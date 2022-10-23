@@ -1,0 +1,17 @@
+<html>
+    <script src="https://code.jquery.com/jquery-3.2.1.min.js"></script>
+    <body>
+      <h1>This Is Not A Drill</h1>
+      <img id='notadrill' src='' id='notadrill'>
+      <h2 id=caption> </h2>
+    </body>
+
+    <script>
+			$.getJSON('https://kra54x9cs6.execute-api.eu-west-2.amazonaws.com/', function(data){
+        var img=document.getElementById("notadrill")
+        img.src = data.url
+        document.getElementById('caption').innerHTML = "It is a " + data.name
+
+      });
+    </script>
+</html>
