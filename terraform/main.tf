@@ -1,9 +1,25 @@
 provider "aws" {
   region = var.region
+  default_tags {
+    tags = {
+      project = "this-is-not-a-drill"
+      repo    = "https://github.com/BigRedS/this-is-not-a-drill"
+    }
+  }
+}
+
+data "terraform_remote_state" "aws_tf_common" {
+  backend = "remote"
+  config = {
+    organization = "bigreds"
+    workspaces = {
+      name = "aws-tf-common"
+    }
+  }
 }
 
 resource "aws_iam_role" "lambda" {
-  name = "lambdaRole"
+  name = "thisisnotadrill-lambda"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -19,7 +35,7 @@ resource "aws_iam_role" "lambda" {
 }
 
 resource "aws_iam_role_policy" "lambda" {
-  name = "LambdaPolicy"
+  name = "thisisnotadrill-lambda"
   role = aws_iam_role.lambda.id
   policy = jsonencode({
     Version = "2012-10-17"
@@ -39,7 +55,6 @@ resource "aws_iam_role_policy" "lambda" {
   })
 }
 
-
 provider "archive" {}
 data "archive_file" "lambda_payload" {
   type        = "zip"
@@ -48,11 +63,11 @@ data "archive_file" "lambda_payload" {
 }
 
 resource "aws_lambda_function" "notadrill" {
-  function_name = "notadrill"
-  filename      = data.archive_file.lambda_payload.output_path
-  role          = aws_iam_role.lambda.arn
-  handler       = "notadrill.lambda_handler"
-  runtime       = "python3.9"
+  function_name    = "notadrill"
+  filename         = data.archive_file.lambda_payload.output_path
+  role             = aws_iam_role.lambda.arn
+  handler          = "notadrill.lambda_handler"
+  runtime          = "python3.9"
   source_code_hash = filebase64sha256("../lambda/notadrill.py")
   environment {
     variables = {
@@ -63,47 +78,67 @@ resource "aws_lambda_function" "notadrill" {
 
 resource "aws_s3_bucket" "notdrills" {
   bucket = "notdrills"
-  acl = "public-read"
+  acl    = "public-read"
 }
 
 resource "aws_s3_bucket" "thisisnotadrill" {
   bucket = "thisisnotadrill"
-  acl = "public-read"
+  acl    = "public-read"
 }
 
 resource "aws_apigatewayv2_api" "lambda-api" {
-    name          = "v2-http-api"
-    protocol_type = "HTTP"
+  name          = "thisisnotadrill"
+  protocol_type = "HTTP"
 }
 
 resource "aws_apigatewayv2_stage" "lambda-stage" {
-    api_id      = aws_apigatewayv2_api.lambda-api.id
-    name        = "$default"
-    auto_deploy = true
+  api_id      = aws_apigatewayv2_api.lambda-api.id
+  name        = "$default"
+  auto_deploy = true
 }
 
 resource "aws_apigatewayv2_integration" "lambda-integration" {
-    api_id           = aws_apigatewayv2_api.lambda-api.id
-    integration_type = "AWS_PROXY"
+  api_id           = aws_apigatewayv2_api.lambda-api.id
+  integration_type = "AWS_PROXY"
 
-    integration_method   = "POST"
-    integration_uri      = aws_lambda_function.notadrill.invoke_arn
-    passthrough_behavior = "WHEN_NO_MATCH"
+  integration_method   = "POST"
+  integration_uri      = aws_lambda_function.notadrill.invoke_arn
+  passthrough_behavior = "WHEN_NO_MATCH"
 }
 
 resource "aws_apigatewayv2_route" "lambda-route" {
-    api_id             = aws_apigatewayv2_api.lambda-api.id
-    route_key          = "GET /{proxy+}"
-    target             = "integrations/${aws_apigatewayv2_integration.lambda-integration.id}"
+  api_id    = aws_apigatewayv2_api.lambda-api.id
+  route_key = "GET /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda-integration.id}"
 }
 
+resource "aws_apigatewayv2_domain_name" "this" {
+  domain_name = "notadrill.avi.pm"
+  domain_name_configuration {
+    certificate_arn = data.terraform_remote_state.aws_tf_common.outputs.avipm_cert_id
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+}
 
+resource "aws_route53_record" "this" {
+  name    = aws_apigatewayv2_domain_name.this.domain_name
+  type    = "A"
+  zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.this.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.this.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+
+}
 
 resource "aws_lambda_permission" "api-gw" {
-    statement_id  = "AllowExecutionFromAPIGateway"
-    action        = "lambda:InvokeFunction"
-    function_name = aws_lambda_function.notadrill.arn
-    principal     = "apigateway.amazonaws.com"
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.notadrill.arn
+  principal     = "apigateway.amazonaws.com"
 
-    source_arn = "${aws_apigatewayv2_api.lambda-api.execution_arn}/*/*/*"
+  source_arn = "${aws_apigatewayv2_api.lambda-api.execution_arn}/*/*/*"
 }
