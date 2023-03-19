@@ -91,6 +91,30 @@ resource "aws_apigatewayv2_api" "lambda-api" {
   protocol_type = "HTTP"
 }
 
+resource "aws_s3_bucket_website_configuration" "thisisnotadrill" {
+  bucket = aws_s3_bucket.thisisnotadrill.id
+
+  index_document {
+    suffix = "index.html"
+  }
+
+  error_document {
+    key = "error.html"
+  }
+}
+
+resource "aws_route53_record" "thisisnotadrill" {
+  zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
+  name    = "thisisnotadrill.avi.pm"
+  type    = "A"
+  alias {
+    name                   = aws_s3_bucket.thisisnotadrill.website_endpoint
+    zone_id                = aws_s3_bucket.thisisnotadrill.hosted_zone_id
+    evaluate_target_health = true
+  }
+}
+
+
 resource "aws_apigatewayv2_stage" "lambda-stage" {
   api_id      = aws_apigatewayv2_api.lambda-api.id
   name        = "$default"
@@ -113,7 +137,7 @@ resource "aws_apigatewayv2_route" "lambda-route" {
 }
 
 resource "aws_apigatewayv2_domain_name" "this" {
-  domain_name = "notadrill.avi.pm"
+  domain_name = "notadrill-api.avi.pm"
   domain_name_configuration {
     certificate_arn = data.terraform_remote_state.aws_tf_common.outputs.avipm_cert_id
     endpoint_type   = "REGIONAL"
@@ -121,7 +145,7 @@ resource "aws_apigatewayv2_domain_name" "this" {
   }
 }
 
-resource "aws_route53_record" "this" {
+resource "aws_route53_record" "api-gw" {
   name    = aws_apigatewayv2_domain_name.this.domain_name
   type    = "A"
   zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
