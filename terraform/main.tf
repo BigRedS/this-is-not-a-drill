@@ -18,6 +18,7 @@ data "terraform_remote_state" "aws_tf_common" {
   }
 }
 
+# Lambda
 resource "aws_iam_role" "lambda" {
   name = "thisisnotadrill-lambda"
   assume_role_policy = jsonencode({
@@ -76,6 +77,66 @@ resource "aws_lambda_function" "notadrill" {
   }
 }
 
+
+resource "aws_apigatewayv2_api" "lambda" {
+  name          = "thisisnotadrill"
+  protocol_type = "HTTP"
+}
+
+
+resource "aws_apigatewayv2_stage" "lambda" {
+  api_id      = aws_apigatewayv2_api.lambda.id
+  name        = "$default"
+  auto_deploy = true
+}
+
+resource "aws_apigatewayv2_integration" "lambda" {
+  api_id           = aws_apigatewayv2_api.lambda.id
+  integration_type = "AWS_PROXY"
+
+  integration_method   = "POST"
+  integration_uri      = aws_lambda_function.notadrill.invoke_arn
+  passthrough_behavior = "WHEN_NO_MATCH"
+}
+
+resource "aws_apigatewayv2_route" "lambda" {
+  api_id    = aws_apigatewayv2_api.lambda.id
+  route_key = "GET /{proxy+}"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_domain_name" "lambda" {
+  domain_name = "notadrill-api.avi.pm"
+  domain_name_configuration {
+    certificate_arn = data.terraform_remote_state.aws_tf_common.outputs.avipm_cert_id
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+}
+
+resource "aws_route53_record" "lambda" {
+  name    = aws_apigatewayv2_domain_name.lambda.domain_name
+  type    = "A"
+  zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
+
+  alias {
+    name                   = aws_apigatewayv2_domain_name.lambda.domain_name_configuration[0].target_domain_name
+    zone_id                = aws_apigatewayv2_domain_name.lambda.domain_name_configuration[0].hosted_zone_id
+    evaluate_target_health = false
+  }
+
+}
+
+resource "aws_lambda_permission" "lambda" {
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.notadrill.arn
+  principal     = "apigateway.amazonaws.com"
+
+  source_arn = "${aws_apigatewayv2_api.lambda.execution_arn}/*/*/*"
+}
+
+# Buckets
 resource "aws_s3_bucket" "notdrills" {
   bucket = "notdrills"
   acl    = "public-read"
@@ -85,12 +146,6 @@ resource "aws_s3_bucket" "thisisnotadrill" {
   bucket = "thisisnotadrill"
   acl    = "public-read"
 }
-
-resource "aws_apigatewayv2_api" "lambda-api" {
-  name          = "thisisnotadrill"
-  protocol_type = "HTTP"
-}
-
 resource "aws_s3_bucket_website_configuration" "thisisnotadrill" {
   bucket = aws_s3_bucket.thisisnotadrill.id
 
@@ -108,61 +163,8 @@ resource "aws_route53_record" "thisisnotadrill" {
   name    = "thisisnotadrill.avi.pm"
   type    = "A"
   alias {
-    name                   = aws_s3_bucket.thisisnotadrill.website_endpoint
+    name                   = aws_s3_bucket_website_configuration.thisisnotadrill.website_domain
     zone_id                = aws_s3_bucket.thisisnotadrill.hosted_zone_id
     evaluate_target_health = true
   }
-}
-
-
-resource "aws_apigatewayv2_stage" "lambda-stage" {
-  api_id      = aws_apigatewayv2_api.lambda-api.id
-  name        = "$default"
-  auto_deploy = true
-}
-
-resource "aws_apigatewayv2_integration" "lambda-integration" {
-  api_id           = aws_apigatewayv2_api.lambda-api.id
-  integration_type = "AWS_PROXY"
-
-  integration_method   = "POST"
-  integration_uri      = aws_lambda_function.notadrill.invoke_arn
-  passthrough_behavior = "WHEN_NO_MATCH"
-}
-
-resource "aws_apigatewayv2_route" "lambda-route" {
-  api_id    = aws_apigatewayv2_api.lambda-api.id
-  route_key = "GET /{proxy+}"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda-integration.id}"
-}
-
-resource "aws_apigatewayv2_domain_name" "this" {
-  domain_name = "notadrill-api.avi.pm"
-  domain_name_configuration {
-    certificate_arn = data.terraform_remote_state.aws_tf_common.outputs.avipm_cert_id
-    endpoint_type   = "REGIONAL"
-    security_policy = "TLS_1_2"
-  }
-}
-
-resource "aws_route53_record" "api-gw" {
-  name    = aws_apigatewayv2_domain_name.this.domain_name
-  type    = "A"
-  zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
-
-  alias {
-    name                   = aws_apigatewayv2_domain_name.this.domain_name_configuration[0].target_domain_name
-    zone_id                = aws_apigatewayv2_domain_name.this.domain_name_configuration[0].hosted_zone_id
-    evaluate_target_health = false
-  }
-
-}
-
-resource "aws_lambda_permission" "api-gw" {
-  statement_id  = "AllowExecutionFromAPIGateway"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.notadrill.arn
-  principal     = "apigateway.amazonaws.com"
-
-  source_arn = "${aws_apigatewayv2_api.lambda-api.execution_arn}/*/*/*"
 }
