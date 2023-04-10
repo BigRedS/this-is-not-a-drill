@@ -7,7 +7,7 @@
     </body>
 
     <script>
-			$.getJSON('https://kra54x9cs6.execute-api.eu-west-2.amazonaws.com/', function(data){
+			$.getJSON('https://notadrill-api.avi.pm', function(data){
         var img=document.getElementById("notadrill")
         img.src = data.url
         document.getElementById('caption').innerHTML = "It is a " + data.name

@@ -8,6 +8,15 @@ provider "aws" {
   }
 }
 
+terraform {
+  cloud {
+    organization = "bigreds"
+    workspaces {
+      name = "this-is-not-a-drill"
+    }
+  }
+}
+
 data "terraform_remote_state" "aws_tf_common" {
   backend = "remote"
   config = {
@@ -142,12 +151,12 @@ resource "aws_s3_bucket" "notdrills" {
   acl    = "public-read"
 }
 
-resource "aws_s3_bucket" "thisisnotadrill" {
-  bucket = "thisisnotadrill"
+resource "aws_s3_bucket" "website" {
+  bucket = var.website-dns-name
   acl    = "public-read"
 }
-resource "aws_s3_bucket_website_configuration" "thisisnotadrill" {
-  bucket = aws_s3_bucket.thisisnotadrill.id
+resource "aws_s3_bucket_website_configuration" "website" {
+  bucket = aws_s3_bucket.website.id
 
   index_document {
     suffix = "index.html"
@@ -158,13 +167,64 @@ resource "aws_s3_bucket_website_configuration" "thisisnotadrill" {
   }
 }
 
-resource "aws_route53_record" "thisisnotadrill" {
+resource "aws_s3_bucket_policy" "website_access" {
+  bucket = aws_s3_bucket.website.id
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "PublicReadGetObject",
+        "Effect" : "Allow",
+        "Principal" : "*",
+        "Action" : [
+          "s3:GetObject"
+        ],
+        "Resource" : [
+          "arn:aws:s3:::${aws_s3_bucket.website.id}/*",
+          "arn:aws:s3:::${aws_s3_bucket.website.id}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_s3_bucket_policy" "notdrills_access" {
+  bucket = aws_s3_bucket.notdrills.id
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "PublicReadGetObject",
+        "Effect" : "Allow",
+        "Principal" : "*",
+        "Action" : [
+          "s3:GetObject"
+        ],
+        "Resource" : [
+          "arn:aws:s3:::${aws_s3_bucket.notdrills.id}/*",
+          "arn:aws:s3:::${aws_s3_bucket.notdrills.id}"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_s3_bucket_cors_configuration" "notdrills" {
+  bucket = aws_s3_bucket.notdrills.id
+
+  cors_rule {
+    allowed_methods = ["GET", "HEAD"]
+    allowed_origins = [var.website-dns-name]
+  }
+}
+
+resource "aws_route53_record" "website" {
   zone_id = data.terraform_remote_state.aws_tf_common.outputs.avipm_zone_id
   name    = "thisisnotadrill.avi.pm"
   type    = "A"
   alias {
-    name                   = aws_s3_bucket_website_configuration.thisisnotadrill.website_domain
-    zone_id                = aws_s3_bucket.thisisnotadrill.hosted_zone_id
+    name                   = aws_s3_bucket_website_configuration.website.website_domain
+    zone_id                = aws_s3_bucket.website.hosted_zone_id
     evaluate_target_health = true
   }
 }
